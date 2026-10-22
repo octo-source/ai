@@ -134,4 +134,4 @@ jobs:
         run: pnpm exec playwright install --with-deps
 
       - name: Run tests
-        run: pnpm test
+        run: TEST_NODE_VERSION="$(node --version)" pnpm test
