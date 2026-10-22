@@ -9060,6 +9060,148 @@ describe('streamText', () => {
   });
 
   describe('tool callbacks', () => {
+    it('should await input callbacks in provider order before executing each tool', async () => {
+      const recordedCalls: string[] = [];
+      const abortSignal = new AbortController().signal;
+      const recordCallback = async (
+        type: string,
+        options: {
+          toolCallId: string;
+          messages: ModelMessage[];
+          abortSignal?: AbortSignal;
+        },
+      ) => {
+        const { toolCallId } = options;
+        expect(options.abortSignal).toBe(abortSignal);
+        expect(options.messages).toEqual([
+          { role: 'user', content: 'test-input' },
+        ]);
+        recordedCalls.push(`${type}:${toolCallId}:start`);
+        // Let upstream readers prefetch while this callback is suspended.
+        await delay(0);
+        recordedCalls.push(`${type}:${toolCallId}:end`);
+      };
+      const createTool = () =>
+        tool({
+          inputSchema: z.object({ value: z.string() }),
+          onInputStart: options => recordCallback('input-start', options),
+          onInputDelta: options => recordCallback('input-delta', options),
+          onInputAvailable: options =>
+            recordCallback('input-available', options),
+          execute: ({ value }, { toolCallId }) => {
+            recordedCalls.push(`execute:${toolCallId}`);
+            return value;
+          },
+        });
+
+      const result = streamText({
+        model: createTestModel({
+          stream: convertArrayToReadableStream([
+            { type: 'tool-input-start', id: 'call-1', toolName: 'first' },
+            { type: 'tool-input-start', id: 'call-2', toolName: 'second' },
+            {
+              type: 'tool-input-delta',
+              id: 'call-2',
+              delta: '{"value":"two"}',
+            },
+            {
+              type: 'tool-input-delta',
+              id: 'call-1',
+              delta: '{"value":"one"}',
+            },
+            { type: 'tool-input-end', id: 'call-1' },
+            {
+              type: 'tool-call',
+              toolCallId: 'call-1',
+              toolName: 'first',
+              input: '{"value":"one"}',
+            },
+            { type: 'tool-input-end', id: 'call-2' },
+            {
+              type: 'tool-call',
+              toolCallId: 'call-2',
+              toolName: 'second',
+              input: '{"value":"two"}',
+            },
+            { type: 'finish', finishReason: 'tool-calls', usage: testUsage },
+          ]),
+        }),
+        tools: { first: createTool(), second: createTool() },
+        prompt: 'test-input',
+        abortSignal,
+      });
+
+      await result.consumeStream();
+
+      expect(recordedCalls).toEqual([
+        'input-start:call-1:start',
+        'input-start:call-1:end',
+        'input-start:call-2:start',
+        'input-start:call-2:end',
+        'input-delta:call-2:start',
+        'input-delta:call-2:end',
+        'input-delta:call-1:start',
+        'input-delta:call-1:end',
+        'input-available:call-1:start',
+        'input-available:call-1:end',
+        'execute:call-1',
+        'input-available:call-2:start',
+        'input-available:call-2:end',
+        'execute:call-2',
+      ]);
+      expect((await result.toolResults).map(result => result.output)).toEqual([
+        'one',
+        'two',
+      ]);
+    });
+
+    it.each(['onInputStart', 'onInputDelta'] as const)(
+      'should surface rejected %s callbacks without executing the tool',
+      async callback => {
+        const error = new Error(`${callback} rejected`);
+        const execute = vi.fn();
+        const onInputAvailable = vi.fn();
+        const result = streamText({
+          model: createTestModel({
+            stream: convertArrayToReadableStream([
+              { type: 'tool-input-start', id: 'call-1', toolName: 'testTool' },
+              {
+                type: 'tool-input-delta',
+                id: 'call-1',
+                delta: '{"value":"one"}',
+              },
+              { type: 'tool-input-end', id: 'call-1' },
+              {
+                type: 'tool-call',
+                toolCallId: 'call-1',
+                toolName: 'testTool',
+                input: '{"value":"one"}',
+              },
+              { type: 'finish', finishReason: 'tool-calls', usage: testUsage },
+            ]),
+          }),
+          tools: {
+            testTool: tool({
+              inputSchema: z.object({ value: z.string() }),
+              onInputAvailable,
+              execute,
+              [callback]: async () => {
+                await delay(0);
+                throw error;
+              },
+            }),
+          },
+          prompt: 'test-input',
+        });
+
+        await expect(
+          convertAsyncIterableToArray(result.fullStream),
+        ).rejects.toBe(error);
+        expect(onInputAvailable).not.toHaveBeenCalled();
+        expect(execute).not.toHaveBeenCalled();
+      },
+    );
+
     it('should invoke callbacks in the correct order', async () => {
       const recordedCalls: unknown[] = [];
 
@@ -10935,6 +11077,70 @@ describe('streamText', () => {
             ]
           `);
       });
+
+      it.each([false, true])(
+        'should discard prefetched chunks after STOP and preserve finish frames (preceding transform: %s)',
+        async precedingTransform => {
+          const receivedAfterStop: TextStreamPart<ToolSet>[] = [];
+          let stopped = false;
+          const result = streamText({
+            model: createTestModel({
+              stream: convertArrayToReadableStream([
+                { type: 'text-start', id: '1' },
+                { type: 'text-delta', id: '1', delta: 'Hello, ' },
+                { type: 'text-delta', id: '1', delta: 'STOP' },
+                { type: 'text-delta', id: '1', delta: ' World' },
+                { type: 'text-delta', id: '1', delta: ' must be discarded' },
+                { type: 'text-end', id: '1' },
+                { type: 'finish', finishReason: 'stop', usage: testUsage },
+              ]),
+            }),
+            prompt: 'test-input',
+            experimental_transform: [
+              ...(precedingTransform
+                ? [() => new TransformStream<TextStreamPart<ToolSet>>()]
+                : []),
+              options => {
+                const stopTransform = stopWordTransform()(options);
+                const writer = stopTransform.writable.getWriter();
+                return {
+                  readable: stopTransform.readable,
+                  writable: new WritableStream<TextStreamPart<ToolSet>>({
+                    async write(chunk) {
+                      if (stopped) receivedAfterStop.push(chunk);
+                      if (
+                        chunk.type === 'text-delta' &&
+                        chunk.text === 'STOP'
+                      ) {
+                        // Ensure subsequent source chunks can reach pipeline buffers.
+                        await delay(0);
+                        stopped = true;
+                      }
+                      await writer.write(chunk);
+                    },
+                    close: () => writer.close(),
+                    abort: reason => writer.abort(reason),
+                  }),
+                };
+              },
+              () => new TransformStream<TextStreamPart<ToolSet>>(),
+            ],
+          });
+
+          const parts = await convertAsyncIterableToArray(result.fullStream);
+          expect(receivedAfterStop).toEqual([]);
+          expect(parts.map(part => part.type)).toEqual([
+            'start',
+            'start-step',
+            'text-start',
+            'text-delta',
+            'finish-step',
+            'finish',
+          ]);
+          expect(await result.text).toBe('Hello, ');
+          expect(await result.finishReason).toBe('stop');
+        },
+      );
 
       it('options.onStepFinish should be called', async () => {
         let result!: Parameters<

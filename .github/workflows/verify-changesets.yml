@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: 'lts/*'
+          node-version: 22.23.4
       - name: get all changed files from .changeset/*.md
         id: changeset-files
         run: |

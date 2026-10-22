@@ -5,10 +5,13 @@
     "dev": "next"
   },
   "dependencies": {
-    "next": "canary",
-    "react": "rc",
-    "react-dom": "rc",
+    "next": "15.5.28",
+    "react": "19.1.10",
+    "react-dom": "19.1.10",
     "ai": "workspace:*"
   },
-  "version": "0.0.0"
+  "version": "0.0.0",
+  "engines": {
+    "node": "^22.23.4 || ^24.22.1 || ^26.12.1"
+  }
 }
