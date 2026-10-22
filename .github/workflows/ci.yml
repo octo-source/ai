@@ -22,7 +22,7 @@ jobs:
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.4
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -46,7 +46,7 @@ jobs:
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.4
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -70,7 +70,7 @@ jobs:
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.4
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -94,7 +94,7 @@ jobs:
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.23.4
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -111,7 +111,7 @@ jobs:
       TURBO_TEAM: ${{ vars.TURBO_TEAM }}
     strategy:
       matrix:
-        node-version: [20, 22]
+        node-version: [22.23.4, 24.22.1, 26.12.1]
     steps:
       - name: Checkout
         uses: actions/checkout@v4

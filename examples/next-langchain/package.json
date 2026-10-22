@@ -15,9 +15,9 @@
     "@langchain/core": "0.1.63",
     "ai": "workspace:*",
     "langchain": "0.1.36",
-    "next": "latest",
-    "react": "^18",
-    "react-dom": "^18"
+    "next": "15.5.28",
+    "react": "19.1.10",
+    "react-dom": "19.1.10"
   },
   "devDependencies": {
     "@types/node": "20.17.24",
@@ -25,10 +25,13 @@
     "@types/react-dom": "^18",
     "autoprefixer": "^10.4.14",
     "eslint": "8.57.1",
-    "eslint-config-next": "14.2.3",
+    "eslint-config-next": "15.5.28",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
     "typescript": "5.8.3",
     "@vercel/ai-tsconfig": "workspace:*"
+  },
+  "engines": {
+    "node": "^22.23.4 || ^24.22.1 || ^26.12.1"
   }
 }

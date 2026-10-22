@@ -9,6 +9,7 @@ export default defineConfig({
     exclude: [
       '**/*.ui.test.ts{,x}',
       '**/*.e2e.test.ts{,x}',
+      '**/*.rsc.test.ts{,x}',
       '**/node_modules/**',
     ],
     typecheck: {

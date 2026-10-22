@@ -35,19 +35,19 @@
     "eslint-config-vercel-ai": "workspace:*",
     "husky": "^8.0.0",
     "lint-staged": "15.2.10",
-    "next": "15.0.0-canary.23",
+    "next": "15.5.28",
     "playwright": "^1.44.1",
     "prettier": "3.5.3",
     "prettier-plugin-svelte": "^3.3.3",
     "publint": "0.2.12",
-    "react": "19.0.0-rc-cc1ec60d0d-20240607",
-    "react-dom": "19.0.0-rc-cc1ec60d0d-20240607",
+    "react": "19.1.10",
+    "react-dom": "19.1.10",
     "turbo": "2.4.4",
     "typescript": "5.8.3",
     "vitest": "2.1.4"
   },
   "engines": {
-    "node": "^18.0.0 || ^20.0.0 || ^22.0.0"
+    "node": "^22.23.4 || ^24.22.1 || ^26.12.1"
   },
   "homepage": "https://ai-sdk.dev/docs",
   "repository": {
@@ -83,6 +83,9 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "esbuild"
-    ]
+    ],
+    "overrides": {
+      "next>sharp": "0.35.5"
+    }
   }
 }

@@ -2,6 +2,8 @@ import { delay } from '@ai-sdk/provider-utils';
 import { convertArrayToReadableStream } from '@ai-sdk/provider-utils/test';
 import { LanguageModelUsage } from 'ai';
 import { MockLanguageModelV2 } from 'ai/test';
+import { Fragment, isValidElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import { z } from 'zod/v4';
 import { streamUI } from './stream-ui';
 
@@ -12,6 +14,15 @@ async function recursiveResolve(val: any): Promise<any> {
 
   if (Array.isArray(val)) {
     return await Promise.all(val.map(recursiveResolve));
+  }
+
+  // Snapshot visible UI through the public renderer. Older snapshot serializers
+  // do not recognize React 19 elements, and internal element fields are not UI.
+  if (
+    isValidElement(val) &&
+    (typeof val.type === 'string' || val.type === Fragment)
+  ) {
+    return renderToStaticMarkup(val);
   }
 
   if (val && typeof val === 'object') {
@@ -228,7 +239,7 @@ describe('rsc - streamUI() onFinish callback', () => {
   });
 
   it('should contain final React node', async () => {
-    expect(result.value).toMatchSnapshot();
+    expect(await simulateFlightServerRender(result.value)).toMatchSnapshot();
   });
 });
 
