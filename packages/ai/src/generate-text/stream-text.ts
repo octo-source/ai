@@ -902,6 +902,7 @@ class DefaultStreamTextResult<TOOLS extends ToolSet, OUTPUT, PARTIAL_OUTPUT>
     const stitchableStream = createStitchableStream<TextStreamPart<TOOLS>>();
     this.addStream = stitchableStream.addStream;
     this.closeStream = stitchableStream.close;
+    let isStreamStopped = false;
 
     let stream = stitchableStream.stream;
 
@@ -928,14 +929,30 @@ class DefaultStreamTextResult<TOOLS extends ToolSet, OUTPUT, PARTIAL_OUTPUT>
     // transform the stream before output parsing
     // to enable replacement of stream segments:
     for (const transform of transforms) {
-      stream = stream.pipeThrough(
-        transform({
-          tools: tools as TOOLS,
-          stopStream() {
-            stitchableStream.terminate();
+      let stopped = false;
+      const transformedStream = transform({
+        tools: tools as TOOLS,
+        stopStream() {
+          stopped = true;
+          isStreamStopped = true;
+          stitchableStream.terminate();
+        },
+      });
+      const writer = transformedStream.writable.getWriter();
+
+      stream = stream.pipeThrough({
+        readable: transformedStream.readable,
+        writable: new WritableStream<TextStreamPart<TOOLS>>({
+          write(chunk) {
+            // Terminating the source does not discard chunks already buffered
+            // between stages. Gate each write at the stopping transform, while
+            // allowing its current write to emit replacement finish events.
+            if (!stopped) return writer.write(chunk);
           },
+          close: () => writer.close(),
+          abort: reason => writer.abort(reason),
         }),
-      );
+      });
     }
 
     this.baseStream = stream
@@ -1113,8 +1130,6 @@ class DefaultStreamTextResult<TOOLS extends ToolSet, OUTPUT, PARTIAL_OUTPUT>
           const stepToolOutputs: ToolOutput<TOOLS>[] = [];
           let warnings: LanguageModelV2CallWarning[] | undefined;
 
-          const activeToolCallToolNames: Record<string, string> = {};
-
           let stepFinishReason: FinishReason = 'unknown';
           let stepUsage: LanguageModelUsage = {
             inputTokens: undefined,
@@ -1262,17 +1277,7 @@ class DefaultStreamTextResult<TOOLS extends ToolSet, OUTPUT, PARTIAL_OUTPUT>
                     }
 
                     case 'tool-input-start': {
-                      activeToolCallToolNames[chunk.id] = chunk.toolName;
-
                       const tool = tools?.[chunk.toolName];
-                      if (tool?.onInputStart != null) {
-                        await tool.onInputStart({
-                          toolCallId: chunk.id,
-                          messages: stepInputMessages,
-                          abortSignal,
-                        });
-                      }
-
                       controller.enqueue({
                         ...chunk,
                         dynamic: tool?.type === 'dynamic',
@@ -1280,25 +1285,8 @@ class DefaultStreamTextResult<TOOLS extends ToolSet, OUTPUT, PARTIAL_OUTPUT>
                       break;
                     }
 
-                    case 'tool-input-end': {
-                      delete activeToolCallToolNames[chunk.id];
-                      controller.enqueue(chunk);
-                      break;
-                    }
-
+                    case 'tool-input-end':
                     case 'tool-input-delta': {
-                      const toolName = activeToolCallToolNames[chunk.id];
-                      const tool = tools?.[toolName];
-
-                      if (tool?.onInputDelta != null) {
-                        await tool.onInputDelta({
-                          inputTextDelta: chunk.delta,
-                          toolCallId: chunk.id,
-                          messages: stepInputMessages,
-                          abortSignal,
-                        });
-                      }
-
                       controller.enqueue(chunk);
                       break;
                     }
@@ -1389,6 +1377,10 @@ class DefaultStreamTextResult<TOOLS extends ToolSet, OUTPUT, PARTIAL_OUTPUT>
                   // wait for the step to be fully processed by the event processor
                   // to ensure that the recorded steps are complete:
                   await stepFinish.promise;
+
+                  // A transform can supply the finish events while cancelling
+                  // this step. Do not enqueue into its cancelled controller.
+                  if (isStreamStopped) return;
 
                   const clientToolCalls = stepToolCalls.filter(
                     toolCall => toolCall.providerExecuted !== true,

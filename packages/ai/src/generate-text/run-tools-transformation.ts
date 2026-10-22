@@ -132,6 +132,10 @@ export function runToolsTransformation<TOOLS extends ToolSet>({
   // keep track of tool inputs for provider-side tool results
   const toolInputs = new Map<string, unknown>();
 
+  // Run all input callbacks in this stage, before tool execution. Running
+  // start/delta callbacks downstream lets prefetch overtake async callbacks.
+  const activeToolNames = new Map<string, string>();
+
   let canClose = false;
   let finishChunk:
     | (SingleRequestTextStreamPart<TOOLS> & { type: 'finish' })
@@ -173,13 +177,40 @@ export function runToolsTransformation<TOOLS extends ToolSet>({
         case 'reasoning-start':
         case 'reasoning-delta':
         case 'reasoning-end':
-        case 'tool-input-start':
-        case 'tool-input-delta':
-        case 'tool-input-end':
         case 'source':
         case 'response-metadata':
         case 'error':
         case 'raw': {
+          controller.enqueue(chunk);
+          break;
+        }
+
+        case 'tool-input-start': {
+          activeToolNames.set(chunk.id, chunk.toolName);
+          await tools?.[chunk.toolName]?.onInputStart?.({
+            toolCallId: chunk.id,
+            messages,
+            abortSignal,
+          });
+          controller.enqueue(chunk);
+          break;
+        }
+
+        case 'tool-input-delta': {
+          const toolName = activeToolNames.get(chunk.id);
+          const tool = toolName == null ? undefined : tools?.[toolName];
+          await tool?.onInputDelta?.({
+            inputTextDelta: chunk.delta,
+            toolCallId: chunk.id,
+            messages,
+            abortSignal,
+          });
+          controller.enqueue(chunk);
+          break;
+        }
+
+        case 'tool-input-end': {
+          activeToolNames.delete(chunk.id);
           controller.enqueue(chunk);
           break;
         }
